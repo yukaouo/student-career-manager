@@ -26,6 +26,11 @@ COLUMNS = [
     "終了日",
     "単日",
     "メモ",
+    "ES設問",
+    "ES回答",
+    "ES提出日",
+    "ES結果",
+    "ESメモ",
 ]
 
 STATUS_OPTIONS = [
@@ -54,6 +59,7 @@ EVENT_OPTIONS = [
 
 JOB_OPTIONS = ["通信", "インフラ", "メーカー", "コンサル", "SIer", "SE"]
 FINAL_STATUSES = {"内定", "落選"}
+ES_RESULT_OPTIONS = ["未作成", "作成中", "提出済み", "通過", "不通過", "保留"]
 
 LIGHT_STATUS_COLORS = {
     "プレエントリー前": "#e8f1ff",
@@ -158,7 +164,53 @@ def apply_style(dark_mode: bool) -> None:
             overflow: hidden;
             text-overflow: ellipsis;
         }}
+        .es-archive-card {{
+            background: {panel};
+            border: 1px solid {border};
+            border-radius: 8px;
+            padding: 14px;
+            margin-bottom: 10px;
+        }}
+        .es-answer {{
+            white-space: pre-wrap;
+            color: {text};
+            line-height: 1.7;
+            font-size: 0.92rem;
+        }}
+        section[data-testid="stSidebar"] button,
+        div[data-testid="stButton"] > button,
+        div[data-testid="stDownloadButton"] > button,
+        div[data-testid="stLinkButton"] > a {{
+            min-height: 42px;
+        }}
         @media (max-width: 760px) {{
+            .block-container {{
+                padding-left: 0.75rem;
+                padding-right: 0.75rem;
+                padding-top: 1rem;
+            }}
+            div[data-testid="stHorizontalBlock"] {{
+                flex-direction: column;
+            }}
+            div[data-testid="stHorizontalBlock"] > div {{
+                width: 100% !important;
+            }}
+            div[data-testid="stButton"] > button,
+            div[data-testid="stDownloadButton"] > button,
+            div[data-testid="stLinkButton"] > a {{
+                width: 100%;
+            }}
+            div[data-testid="stTabs"] div[role="tablist"] {{
+                overflow-x: auto;
+                white-space: nowrap;
+                flex-wrap: nowrap;
+            }}
+            div[data-testid="stMetric"] {{
+                background: {panel};
+                border: 1px solid {border};
+                border-radius: 8px;
+                padding: 8px;
+            }}
             .calendar-grid {{
                 gap: 4px;
             }}
@@ -277,6 +329,13 @@ def to_date_input_value(value: object) -> date:
     parsed = parse_date(value)
     if pd.isna(parsed):
         return date.today()
+    return parsed.date()
+
+
+def to_optional_date_input_value(value: object):
+    parsed = parse_date(value)
+    if pd.isna(parsed):
+        return None
     return parsed.date()
 
 
@@ -429,12 +488,20 @@ def render_card(row: pd.Series, status_colors: dict[str, str]) -> None:
     status = html.escape(str(row.get("ステータス", "")))
     kind = html.escape(str(row.get("種別", "")))
     memo = html.escape(str(row.get("メモ", "")))
+    es_result = html.escape(str(row.get("ES結果", "")))
+    es_submitted = html.escape(str(row.get("ES提出日", "")))
     date_text = html.escape(date_label(row))
     bg = status_colors.get(str(row.get("ステータス", "")), "#ffffff")
 
     job_tags = "".join(f'<span class="tag">{html.escape(tag)}</span>' for tag in split_jobs(job))
     memo_html = f"<br>メモ：{memo}" if memo else ""
     id_html = f"<br>企業ID：{company_id}" if company_id else ""
+    es_parts = []
+    if es_result:
+        es_parts.append(f"ES：{es_result}")
+    if es_submitted:
+        es_parts.append(f"提出日：{es_submitted}")
+    es_html = f"<br>{' / '.join(es_parts)}" if es_parts else ""
 
     st.markdown(
         f"""
@@ -446,6 +513,7 @@ def render_card(row: pd.Series, status_colors: dict[str, str]) -> None:
                 日付：{date_text}
                 {id_html}
                 {memo_html}
+                {es_html}
             </div>
         </div>
         """,
@@ -505,6 +573,50 @@ def upsert_form(prefix: str, df: pd.DataFrame, row_id: int | None = None) -> Non
 
         start_date, end_date, single_date = date_fields(prefix, kind, row)
         memo = st.text_area("メモ", value=str(row.get("メモ", "")), key=f"{prefix}_memo")
+
+        has_es_archive = bool(
+            str(row.get("ES設問", "")).strip()
+            or str(row.get("ES回答", "")).strip()
+            or str(row.get("ESメモ", "")).strip()
+        )
+        with st.expander("ESアーカイブ", expanded=has_es_archive):
+            es_result_default = str(row.get("ES結果", "未作成"))
+            if es_result_default not in ES_RESULT_OPTIONS:
+                es_result_default = "未作成"
+            es_col1, es_col2 = st.columns(2)
+            with es_col1:
+                es_result = st.selectbox(
+                    "ES状態",
+                    ES_RESULT_OPTIONS,
+                    index=ES_RESULT_OPTIONS.index(es_result_default),
+                    key=f"{prefix}_es_result",
+                )
+            with es_col2:
+                es_submitted_date = st.date_input(
+                    "ES提出日",
+                    value=to_optional_date_input_value(row.get("ES提出日", "")),
+                    key=f"{prefix}_es_submitted_date",
+                )
+
+            es_question = st.text_area(
+                "ES設問",
+                value=str(row.get("ES設問", "")),
+                height=100,
+                key=f"{prefix}_es_question",
+            )
+            es_answer = st.text_area(
+                "ES回答",
+                value=str(row.get("ES回答", "")),
+                height=180,
+                key=f"{prefix}_es_answer",
+            )
+            es_memo = st.text_area(
+                "ESメモ",
+                value=str(row.get("ESメモ", "")),
+                height=80,
+                key=f"{prefix}_es_memo",
+            )
+
         allow_duplicate = st.checkbox(
             "同じ企業名・企業IDがあっても保存する",
             value=False,
@@ -542,6 +654,11 @@ def upsert_form(prefix: str, df: pd.DataFrame, row_id: int | None = None) -> Non
         "終了日": end_date,
         "単日": single_date,
         "メモ": memo.strip(),
+        "ES設問": es_question.strip(),
+        "ES回答": es_answer.strip(),
+        "ES提出日": date_to_str(es_submitted_date),
+        "ES結果": es_result,
+        "ESメモ": es_memo.strip(),
     }
 
     if is_edit:
@@ -848,6 +965,106 @@ def show_company_list(df: pd.DataFrame, status_colors: dict[str, str]) -> None:
                 st.rerun()
 
 
+def has_es_content(row: pd.Series) -> bool:
+    return any(
+        str(row.get(column, "")).strip()
+        for column in ["ES設問", "ES回答", "ES提出日", "ESメモ"]
+    ) or str(row.get("ES結果", "")).strip() not in {"", "未作成"}
+
+
+def show_es_archive(df: pd.DataFrame) -> None:
+    st.subheader("ESアーカイブ")
+
+    working = df.copy()
+    working["_row_id"] = working.index
+    working = working[working.apply(has_es_content, axis=1)]
+
+    if working.empty:
+        st.info("ESアーカイブはまだありません。登録・編集画面の「ESアーカイブ」から保存できます。")
+        return
+
+    total_count = len(working)
+    submitted_count = len(working[working["ES結果"].isin(["提出済み", "通過", "不通過"])])
+    passed_count = len(working[working["ES結果"] == "通過"])
+
+    metric_col1, metric_col2, metric_col3 = st.columns(3)
+    metric_col1.metric("保存ES", total_count)
+    metric_col2.metric("提出済み", submitted_count)
+    metric_col3.metric("通過", passed_count)
+
+    filter_col1, filter_col2, filter_col3 = st.columns([2, 1, 1])
+    with filter_col1:
+        search_word = st.text_input("ES検索", placeholder="企業名・設問・回答・メモで検索")
+    with filter_col2:
+        result_filter = st.selectbox("ES状態", ["すべて"] + ES_RESULT_OPTIONS)
+    with filter_col3:
+        sort_type = st.selectbox("ES並び替え", ["提出日が近い順", "企業名順", "状態順"])
+
+    if result_filter != "すべて":
+        working = working[working["ES結果"] == result_filter]
+
+    if search_word:
+        needle = search_word.strip()
+        working = working[
+            working["企業名"].astype(str).str.contains(needle, case=False, na=False)
+            | working["ES設問"].astype(str).str.contains(needle, case=False, na=False)
+            | working["ES回答"].astype(str).str.contains(needle, case=False, na=False)
+            | working["ESメモ"].astype(str).str.contains(needle, case=False, na=False)
+        ]
+
+    if sort_type == "企業名順":
+        working = working.sort_values("企業名")
+    elif sort_type == "状態順":
+        working = working.sort_values("ES結果")
+    else:
+        working["_sort_date"] = pd.to_datetime(working["ES提出日"], errors="coerce")
+        working = working.sort_values("_sort_date", ascending=False, na_position="last")
+
+    export_columns = ["企業名", "企業ID", "職種", "ステータス", "ES結果", "ES提出日", "ES設問", "ES回答", "ESメモ"]
+    st.download_button(
+        "ESアーカイブCSVをダウンロード",
+        data=working[export_columns].to_csv(index=False, encoding="utf-8-sig").encode("utf-8-sig"),
+        file_name="es_archive.csv",
+        mime="text/csv",
+    )
+
+    if working.empty:
+        st.info("条件に一致するESはありません。")
+        return
+
+    for _, row in working.iterrows():
+        row_id = int(row["_row_id"])
+        with st.container(border=True):
+            header_col1, header_col2 = st.columns([2, 1])
+            with header_col1:
+                st.markdown(f"**{row['企業名']}**")
+                st.caption(f"{row['職種']} / {row['ステータス']}")
+            with header_col2:
+                st.write(f"ES状態：{row['ES結果'] or '未作成'}")
+                st.caption(f"提出日：{row['ES提出日'] or '未入力'}")
+
+            if str(row["ES設問"]).strip():
+                st.markdown("**設問**")
+                st.write(row["ES設問"])
+
+            if str(row["ES回答"]).strip():
+                st.markdown("**回答**")
+                st.text_area(
+                    "回答本文",
+                    value=str(row["ES回答"]),
+                    height=180,
+                    disabled=True,
+                    key=f"archive_answer_{row_id}",
+                    label_visibility="collapsed",
+                )
+
+            if str(row["ESメモ"]).strip():
+                st.caption(f"メモ：{row['ESメモ']}")
+
+            with st.expander("このESを編集", expanded=False):
+                upsert_form(f"es_edit_{row_id}", df, row_id=row_id)
+
+
 def show_settings(df: pd.DataFrame) -> None:
     st.subheader("データ管理")
     st.caption(f"CSV保存先：{CSV_FILE}")
@@ -934,8 +1151,8 @@ def main() -> None:
 
     df = read_csv_safely()
 
-    tab_dashboard, tab_register, tab_list, tab_calendar, tab_settings = st.tabs(
-        ["ダッシュボード", "登録", "一覧・編集", "カレンダー", "データ"]
+    tab_dashboard, tab_register, tab_list, tab_calendar, tab_es_archive, tab_settings = st.tabs(
+        ["ダッシュボード", "登録", "一覧・編集", "カレンダー", "ESアーカイブ", "データ"]
     )
 
     with tab_dashboard:
@@ -952,6 +1169,9 @@ def main() -> None:
 
     with tab_calendar:
         show_calendar(df)
+
+    with tab_es_archive:
+        show_es_archive(df)
 
     with tab_settings:
         show_settings(df)
