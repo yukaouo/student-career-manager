@@ -13,6 +13,7 @@ st.set_page_config(page_title="Career Tree", page_icon="🌳", layout="wide")
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 CSV_FILE = os.path.join(BASE_DIR, "companies.csv")
+DEMO_CSV_FILE = os.path.join(BASE_DIR, "companies_demo.csv")
 BACKUP_DIR = os.path.join(BASE_DIR, "backups")
 
 COLUMNS = [
@@ -80,6 +81,39 @@ DARK_STATUS_COLORS = {
     "内定": "#183820",
     "落選": "#421f20",
 }
+
+
+def get_config_value(name: str, default: str = "") -> str:
+    env_value = os.getenv(name)
+    if env_value is not None:
+        return str(env_value)
+
+    try:
+        secret_value = st.secrets.get(name, default)
+    except Exception:
+        secret_value = default
+
+    return str(secret_value)
+
+
+def get_app_mode() -> str:
+    mode = get_config_value("CAREER_TREE_MODE", "").strip().lower()
+    if mode:
+        return mode
+    if os.path.exists(CSV_FILE):
+        return "local"
+    if os.path.exists(DEMO_CSV_FILE):
+        return "demo"
+    return "local"
+
+
+def is_read_only_mode() -> bool:
+    explicit = get_config_value("CAREER_TREE_READ_ONLY", "").strip().lower()
+    if explicit in {"1", "true", "yes", "on"}:
+        return True
+    if explicit in {"0", "false", "no", "off"}:
+        return False
+    return get_app_mode() in {"demo", "readonly", "read-only", "cloud"}
 
 
 def apply_style(dark_mode: bool) -> None:
@@ -237,18 +271,25 @@ def apply_style(dark_mode: bool) -> None:
 
 def read_csv_safely() -> pd.DataFrame:
     if not os.path.exists(CSV_FILE):
+        if os.path.exists(DEMO_CSV_FILE):
+            return read_csv_file(DEMO_CSV_FILE)
+
         df = pd.DataFrame(columns=COLUMNS)
-        save_data(df)
+        save_data(df, make_backup=False)
         return df
 
+    return read_csv_file(CSV_FILE)
+
+
+def read_csv_file(path: str) -> pd.DataFrame:
     for encoding in ("utf-8-sig", "utf-8", "cp932"):
         try:
-            df = pd.read_csv(CSV_FILE, dtype=str, encoding=encoding).fillna("")
+            df = pd.read_csv(path, dtype=str, encoding=encoding).fillna("")
             break
         except UnicodeDecodeError:
             continue
     else:
-        df = pd.read_csv(CSV_FILE, dtype=str).fillna("")
+        df = pd.read_csv(path, dtype=str).fillna("")
 
     for column in COLUMNS:
         if column not in df.columns:
@@ -902,7 +943,7 @@ def show_calendar(df: pd.DataFrame) -> None:
     st.dataframe(calendar_df, hide_index=True, use_container_width=True)
 
 
-def show_company_list(df: pd.DataFrame, status_colors: dict[str, str]) -> None:
+def show_company_list(df: pd.DataFrame, status_colors: dict[str, str], read_only: bool) -> None:
     st.subheader("登録一覧")
 
     col1, col2, col3 = st.columns([2, 1, 1])
@@ -949,6 +990,9 @@ def show_company_list(df: pd.DataFrame, status_colors: dict[str, str]) -> None:
             if is_url(row["企業HP"]):
                 st.link_button("企業HP", row["企業HP"])
 
+        if read_only:
+            continue
+
         with st.expander("編集・削除", expanded=False):
             upsert_form(f"edit_{row_id}", df, row_id=row_id)
 
@@ -972,7 +1016,7 @@ def has_es_content(row: pd.Series) -> bool:
     ) or str(row.get("ES結果", "")).strip() not in {"", "未作成"}
 
 
-def show_es_archive(df: pd.DataFrame) -> None:
+def show_es_archive(df: pd.DataFrame, read_only: bool) -> None:
     st.subheader("ESアーカイブ")
 
     working = df.copy()
@@ -1061,13 +1105,17 @@ def show_es_archive(df: pd.DataFrame) -> None:
             if str(row["ESメモ"]).strip():
                 st.caption(f"メモ：{row['ESメモ']}")
 
-            with st.expander("このESを編集", expanded=False):
-                upsert_form(f"es_edit_{row_id}", df, row_id=row_id)
+            if not read_only:
+                with st.expander("このESを編集", expanded=False):
+                    upsert_form(f"es_edit_{row_id}", df, row_id=row_id)
 
 
-def show_settings(df: pd.DataFrame) -> None:
+def show_settings(df: pd.DataFrame, read_only: bool) -> None:
     st.subheader("データ管理")
-    st.caption(f"CSV保存先：{CSV_FILE}")
+    if read_only:
+        st.info("閲覧専用モードです。登録・編集・削除・CSV取り込みは無効です。")
+    else:
+        st.caption(f"CSV保存先：{CSV_FILE}")
 
     st.download_button(
         "CSVをダウンロード",
@@ -1099,26 +1147,27 @@ def show_settings(df: pd.DataFrame) -> None:
             use_container_width=True,
         )
 
-    st.divider()
-    st.markdown("#### CSV取り込み")
-    uploaded_file = st.file_uploader("companies.csv を選択", type=["csv"])
-    import_mode = st.radio("取り込み方法", ["上書き", "追加"], horizontal=True)
+    if not read_only:
+        st.divider()
+        st.markdown("#### CSV取り込み")
+        uploaded_file = st.file_uploader("companies.csv を選択", type=["csv"])
+        import_mode = st.radio("取り込み方法", ["上書き", "追加"], horizontal=True)
 
-    if uploaded_file is not None:
-        try:
-            uploaded_df = read_uploaded_csv(uploaded_file)
-            st.caption(f"読み込み件数：{len(uploaded_df)} 件")
+        if uploaded_file is not None:
+            try:
+                uploaded_df = read_uploaded_csv(uploaded_file)
+                st.caption(f"読み込み件数：{len(uploaded_df)} 件")
 
-            if st.button("CSVを取り込む", type="primary"):
-                if import_mode == "追加":
-                    next_df = pd.concat([df, uploaded_df], ignore_index=True)
-                else:
-                    next_df = uploaded_df
-                save_data(next_df)
-                st.success("CSVを取り込みました。")
-                st.rerun()
-        except Exception as exc:
-            st.error(f"CSVを読み込めませんでした：{exc}")
+                if st.button("CSVを取り込む", type="primary"):
+                    if import_mode == "追加":
+                        next_df = pd.concat([df, uploaded_df], ignore_index=True)
+                    else:
+                        next_df = uploaded_df
+                    save_data(next_df)
+                    st.success("CSVを取り込みました。")
+                    st.rerun()
+            except Exception as exc:
+                st.error(f"CSVを読み込めませんでした：{exc}")
 
     st.divider()
     st.markdown("#### バックアップ")
@@ -1143,38 +1192,47 @@ def show_settings(df: pd.DataFrame) -> None:
 def main() -> None:
     st.sidebar.title("Career Tree")
     dark_mode = st.sidebar.toggle("ダークモード", value=False)
+    read_only = is_read_only_mode()
     apply_style(dark_mode)
     status_colors = DARK_STATUS_COLORS if dark_mode else LIGHT_STATUS_COLORS
 
     st.title("🌳 Career Tree")
     st.caption("就活・インターンの企業管理、締切管理、日程管理をまとめるダッシュボード")
+    if read_only:
+        st.info("閲覧専用モードで起動中です。スマホから登録済み内容を安全に確認できます。")
 
     df = read_csv_safely()
 
-    tab_dashboard, tab_register, tab_list, tab_calendar, tab_es_archive, tab_settings = st.tabs(
-        ["ダッシュボード", "登録", "一覧・編集", "カレンダー", "ESアーカイブ", "データ"]
-    )
+    if read_only:
+        tab_dashboard, tab_list, tab_calendar, tab_es_archive, tab_settings = st.tabs(
+            ["ダッシュボード", "企業一覧", "カレンダー", "ESアーカイブ", "データ"]
+        )
+    else:
+        tab_dashboard, tab_register, tab_list, tab_calendar, tab_es_archive, tab_settings = st.tabs(
+            ["ダッシュボード", "登録", "一覧・編集", "カレンダー", "ESアーカイブ", "データ"]
+        )
 
     with tab_dashboard:
         show_dashboard(df)
         show_alerts(df)
         show_upcoming_events(df)
 
-    with tab_register:
-        st.subheader("新規登録")
-        upsert_form("new", df)
+    if not read_only:
+        with tab_register:
+            st.subheader("新規登録")
+            upsert_form("new", df)
 
     with tab_list:
-        show_company_list(df, status_colors)
+        show_company_list(df, status_colors, read_only)
 
     with tab_calendar:
         show_calendar(df)
 
     with tab_es_archive:
-        show_es_archive(df)
+        show_es_archive(df, read_only)
 
     with tab_settings:
-        show_settings(df)
+        show_settings(df, read_only)
 
 
 if __name__ == "__main__":
