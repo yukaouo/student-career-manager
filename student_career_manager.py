@@ -300,6 +300,36 @@ def build_job_value(selected_jobs: list[str], other_job: str) -> str:
     return " / ".join(dict.fromkeys(jobs))
 
 
+def find_duplicate_rows(
+    df: pd.DataFrame,
+    name: str,
+    company_id: str,
+    current_row_id: int | None = None,
+) -> pd.DataFrame:
+    name = name.strip().casefold()
+    company_id = company_id.strip().casefold()
+
+    if not name and not company_id:
+        return pd.DataFrame(columns=df.columns)
+
+    working = df.copy()
+    if current_row_id is not None and current_row_id in working.index:
+        working = working.drop(current_row_id)
+
+    name_match = (
+        working["企業名"].astype(str).str.strip().str.casefold() == name
+        if name
+        else pd.Series(False, index=working.index)
+    )
+    id_match = (
+        working["企業ID"].astype(str).str.strip().str.casefold() == company_id
+        if company_id
+        else pd.Series(False, index=working.index)
+    )
+
+    return working[name_match | id_match]
+
+
 def is_url(value: object) -> bool:
     text = str(value).strip()
     return text.startswith("http://") or text.startswith("https://")
@@ -475,6 +505,11 @@ def upsert_form(prefix: str, df: pd.DataFrame, row_id: int | None = None) -> Non
 
         start_date, end_date, single_date = date_fields(prefix, kind, row)
         memo = st.text_area("メモ", value=str(row.get("メモ", "")), key=f"{prefix}_memo")
+        allow_duplicate = st.checkbox(
+            "同じ企業名・企業IDがあっても保存する",
+            value=False,
+            key=f"{prefix}_allow_duplicate",
+        )
 
         submitted = st.form_submit_button("保存" if is_edit else "登録", type="primary")
 
@@ -483,6 +518,16 @@ def upsert_form(prefix: str, df: pd.DataFrame, row_id: int | None = None) -> Non
 
     if not name.strip():
         st.error("企業名は必須です。")
+        return
+
+    duplicate_rows = find_duplicate_rows(df, name, company_id, row_id)
+    if not duplicate_rows.empty and not allow_duplicate:
+        duplicate_labels = [
+            f"{item['企業名']} / ID: {item['企業ID'] or '未入力'} / {item['ステータス']}"
+            for _, item in duplicate_rows.head(5).iterrows()
+        ]
+        st.error("同じ企業名または企業IDの登録があります。確認してから保存してください。")
+        st.write(duplicate_labels)
         return
 
     next_df = df.copy()
@@ -523,6 +568,16 @@ def show_dashboard(df: pd.DataFrame) -> None:
     col3.metric("合否待ち", waiting_count)
     col4.metric("内定", offer_count)
     col5.metric("落選", fail_count)
+
+    st.markdown("#### ステータス別件数")
+    status_summary = (
+        df["ステータス"]
+        .value_counts()
+        .reindex(STATUS_OPTIONS, fill_value=0)
+        .reset_index()
+    )
+    status_summary.columns = ["ステータス", "件数"]
+    st.dataframe(status_summary, hide_index=True, use_container_width=True)
 
 
 def show_alerts(df: pd.DataFrame) -> None:
@@ -602,63 +657,132 @@ def show_upcoming_events(df: pd.DataFrame) -> None:
     st.dataframe(upcoming_df, hide_index=True, use_container_width=True)
 
 
-def collect_calendar_events(df: pd.DataFrame, year: int, month: int) -> dict[int, list[str]]:
-    events: dict[int, list[str]] = {}
+def collect_calendar_events(
+    df: pd.DataFrame,
+    year: int,
+    month: int,
+    selected_types: list[str],
+) -> dict[int, list[dict[str, str]]]:
+    events: dict[int, list[dict[str, str]]] = {}
 
-    def add_event(value: object, label: str) -> None:
+    def add_event(row: pd.Series, value: object, label: str, event_type: str) -> None:
+        if event_type not in selected_types:
+            return
+
         parsed = parse_date(value)
         if pd.isna(parsed):
             return
+
         if parsed.year == year and parsed.month == month:
-            events.setdefault(parsed.day, []).append(label)
+            events.setdefault(parsed.day, []).append(
+                {
+                    "date": parsed.strftime("%Y-%m-%d"),
+                    "company": str(row["企業名"]),
+                    "label": label,
+                    "status": str(row["ステータス"]),
+                }
+            )
 
     for _, row in df.iterrows():
-        company = str(row["企業名"])
         kind = str(row["種別"])
         if str(row["単日"]).strip():
-            add_event(row["単日"], f"{company} / {kind}")
+            add_event(row, row["単日"], kind or "単日予定", "単日")
         if str(row["開始日"]).strip():
-            add_event(row["開始日"], f"{company} / 開始")
+            add_event(row, row["開始日"], "インターン開始", "開始日")
         if str(row["終了日"]).strip():
-            add_event(row["終了日"], f"{company} / 終了")
+            add_event(row, row["終了日"], "インターン終了", "終了日")
 
     return events
 
 
 def show_calendar(df: pd.DataFrame) -> None:
     st.subheader("カレンダー")
-    selected_month = st.date_input("表示月", value=date.today())
-    year = selected_month.year
-    month = selected_month.month
+
+    today = date.today()
+    year_options = list(range(today.year - 1, today.year + 4))
+    col1, col2, col3 = st.columns([1, 1, 2])
+    with col1:
+        year = st.selectbox(
+            "年",
+            year_options,
+            index=year_options.index(today.year),
+            key="calendar_year",
+        )
+    with col2:
+        month = st.selectbox(
+            "月",
+            list(range(1, 13)),
+            index=today.month - 1,
+            format_func=lambda value: f"{value}月",
+            key="calendar_month",
+        )
+    with col3:
+        selected_types = st.multiselect(
+            "表示する日付",
+            ["単日", "開始日", "終了日"],
+            default=["単日", "開始日", "終了日"],
+            key="calendar_event_types",
+        )
+
     month_name = f"{year}年{month}月"
-    events = collect_calendar_events(df, year, month)
+    events = collect_calendar_events(df, year, month, selected_types)
 
     weeks = calendar.Calendar(firstweekday=6).monthdayscalendar(year, month)
     weekday_names = ["日", "月", "火", "水", "木", "金", "土"]
 
-    html_parts = [f'<div class="calendar-wrap"><h3>{month_name}</h3><div class="calendar-grid">']
-    html_parts.extend(f'<div class="calendar-head">{name}</div>' for name in weekday_names)
+    st.markdown(f"#### {month_name}")
+
+    header_cols = st.columns(7)
+    for col, weekday_name in zip(header_cols, weekday_names):
+        col.markdown(f"**{weekday_name}**")
 
     for week in weeks:
-        for day in week:
-            if day == 0:
-                html_parts.append('<div class="calendar-day empty"></div>')
-                continue
+        day_cols = st.columns(7)
+        for index, day in enumerate(week):
+            col = day_cols[index]
+            with col.container(border=True):
+                if day == 0:
+                    st.write("")
+                    st.caption(" ")
+                    continue
 
-            day_events = events.get(day, [])
-            event_html = "".join(
-                f'<div class="calendar-event">{html.escape(event)}</div>'
-                for event in day_events[:3]
-            )
-            if len(day_events) > 3:
-                event_html += f'<div class="calendar-event">+{len(day_events) - 3}件</div>'
+                if year == today.year and month == today.month and day == today.day:
+                    st.markdown(f"**{day} 今日**")
+                else:
+                    st.markdown(f"**{day}**")
 
-            html_parts.append(
-                f'<div class="calendar-day"><div class="calendar-date">{day}</div>{event_html}</div>'
-            )
+                day_events = events.get(day, [])
+                if not day_events:
+                    st.caption("予定なし")
+                    continue
 
-    html_parts.append("</div></div>")
-    st.markdown("".join(html_parts), unsafe_allow_html=True)
+                for event in day_events[:3]:
+                    st.caption(f"{event['company']} / {event['label']}")
+
+                if len(day_events) > 3:
+                    st.caption(f"ほか {len(day_events) - 3} 件")
+
+    flat_events = [
+        event
+        for day in sorted(events)
+        for event in events[day]
+    ]
+
+    st.markdown("#### 月内予定")
+    if not flat_events:
+        st.info("この月の予定はありません。")
+        return
+
+    calendar_df = pd.DataFrame(flat_events)
+    calendar_df = calendar_df.rename(
+        columns={
+            "date": "日付",
+            "company": "企業名",
+            "label": "予定",
+            "status": "ステータス",
+        }
+    )
+    st.dataframe(calendar_df, hide_index=True, use_container_width=True)
 
 
 def show_company_list(df: pd.DataFrame, status_colors: dict[str, str]) -> None:
@@ -734,6 +858,29 @@ def show_settings(df: pd.DataFrame) -> None:
         file_name="companies.csv",
         mime="text/csv",
     )
+
+    st.divider()
+    st.markdown("#### 重複候補")
+    normalized_name = df["企業名"].astype(str).str.strip()
+    normalized_id = df["企業ID"].astype(str).str.strip()
+    duplicate_mask = (
+        (normalized_name.ne("") & normalized_name.duplicated(keep=False))
+        | (
+            normalized_id.ne("")
+            & normalized_id.duplicated(keep=False)
+        )
+    )
+    duplicate_df = df[duplicate_mask]
+
+    if duplicate_df.empty:
+        st.info("企業名・企業IDの重複候補はありません。")
+    else:
+        st.warning(f"重複候補が {len(duplicate_df)} 件あります。")
+        st.dataframe(
+            duplicate_df[["企業名", "企業ID", "職種", "ステータス", "種別", "単日"]],
+            hide_index=True,
+            use_container_width=True,
+        )
 
     st.divider()
     st.markdown("#### CSV取り込み")
