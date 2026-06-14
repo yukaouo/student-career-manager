@@ -712,28 +712,24 @@ def deadline_state(row: pd.Series) -> tuple[str, str, str]:
 def render_hero(read_only: bool) -> None:
     today = pd.Timestamp.today()
     mode_label = "閲覧専用" if read_only else "編集可能"
-    st.markdown(
-        f"""
-        <div class="app-hero">
-            <div class="brand-word">CAREER <span>TREE</span></div>
-            <div class="hero-copy">選考もESも、次の一手がすぐ見える就活ダッシュボード。</div>
-            <div class="mode-pill">{mode_label} / {today.month}/{today.day} {today.strftime('%a')}</div>
-        </div>
-        """,
-        unsafe_allow_html=True,
+    hero_html = (
+        '<div class="app-hero">'
+        '<div class="brand-word">CAREER <span>TREE</span></div>'
+        '<div class="hero-copy">選考もESも、次の一手がすぐ見える就活ダッシュボード。</div>'
+        f'<div class="mode-pill">{mode_label} / {today.month}/{today.day} {today.strftime("%a")}</div>'
+        "</div>"
     )
+    st.markdown(hero_html, unsafe_allow_html=True)
 
 
 def render_kpi_tiles(metrics: list[tuple[str, int, str]]) -> None:
     items = []
     for label, value, accent in metrics:
         items.append(
-            f"""
-            <div class="kpi-card" style="--accent:{accent};">
-                <div class="kpi-label">{html.escape(label)}</div>
-                <div class="kpi-value">{value}</div>
-            </div>
-            """
+            f'<div class="kpi-card" style="--accent:{accent};">'
+            f'<div class="kpi-label">{html.escape(label)}</div>'
+            f'<div class="kpi-value">{value}</div>'
+            "</div>"
         )
 
     st.markdown(f'<div class="kpi-grid">{"".join(items)}</div>', unsafe_allow_html=True)
@@ -752,15 +748,13 @@ def render_deadline_rows(rows: list[tuple[int, str, str, str]]) -> None:
             days_label = f"あと{days_left}日"
 
         parts.append(
-            f"""
-            <div class="deadline-row" style="--accent:{accent};">
-                <div>
-                    <div class="deadline-main">{html.escape(company)}</div>
-                    <div class="deadline-sub">{html.escape(kind)}</div>
-                </div>
-                <div class="deadline-days">{days_label}</div>
-            </div>
-            """
+            f'<div class="deadline-row" style="--accent:{accent};">'
+            "<div>"
+            f'<div class="deadline-main">{html.escape(company)}</div>'
+            f'<div class="deadline-sub">{html.escape(kind)}</div>'
+            "</div>"
+            f'<div class="deadline-days">{days_label}</div>'
+            "</div>"
         )
 
     st.markdown(f'<div class="deadline-list">{"".join(parts)}</div>', unsafe_allow_html=True)
@@ -843,32 +837,30 @@ def render_card(row: pd.Series, status_colors: dict[str, str]) -> None:
         es_parts.append(f"提出日：{es_submitted}")
     es_html = f"<br>{' / '.join(es_parts)}" if es_parts else ""
 
-    st.markdown(
-        f"""
-        <div class="career-card" style="--accent:{accent}; --urgency:{urgency_color}; --progress:{progress}%;">
-            <div class="career-topline">
-                <div>
-                    <div class="career-title">{company}</div>
-                    <div>{job_tags}</div>
-                </div>
-                <div class="status-chip">{status}</div>
-            </div>
-            <div class="progress-track"><div class="progress-bar"></div></div>
-            <div class="career-meta">
-                種別：{kind}<br>
-                日付：{date_text}
-                {id_html}
-                {memo_html}
-                {es_html}
-            </div>
-            <div style="margin-top:10px;">
-                <span class="deadline-chip">{html.escape(deadline_label)}</span>
-                <span class="career-meta"> {html.escape(deadline_date)}</span>
-            </div>
-        </div>
-        """,
-        unsafe_allow_html=True,
+    card_html = (
+        f'<div class="career-card" style="--accent:{accent}; --urgency:{urgency_color}; --progress:{progress}%;">'
+        '<div class="career-topline">'
+        "<div>"
+        f'<div class="career-title">{company}</div>'
+        f"<div>{job_tags}</div>"
+        "</div>"
+        f'<div class="status-chip">{status}</div>'
+        "</div>"
+        '<div class="progress-track"><div class="progress-bar"></div></div>'
+        '<div class="career-meta">'
+        f"種別：{kind}<br>"
+        f"日付：{date_text}"
+        f"{id_html}"
+        f"{memo_html}"
+        f"{es_html}"
+        "</div>"
+        '<div style="margin-top:10px;">'
+        f'<span class="deadline-chip">{html.escape(deadline_label)}</span>'
+        f'<span class="career-meta"> {html.escape(deadline_date)}</span>'
+        "</div>"
+        "</div>"
     )
+    st.markdown(card_html, unsafe_allow_html=True)
 
 
 def upsert_form(prefix: str, df: pd.DataFrame, row_id: int | None = None) -> None:
@@ -1148,10 +1140,24 @@ def collect_calendar_events(
         kind = str(row["種別"])
         if str(row["単日"]).strip():
             add_event(row, row["単日"], kind or "単日予定", "単日")
-        if str(row["開始日"]).strip():
-            add_event(row, row["開始日"], "インターン開始", "開始日")
-        if str(row["終了日"]).strip():
-            add_event(row, row["終了日"], "インターン終了", "終了日")
+
+        start = parse_date(row["開始日"])
+        end = parse_date(row["終了日"])
+        if not pd.isna(start) and not pd.isna(end):
+            if end < start:
+                start, end = end, start
+            for current in pd.date_range(start.normalize(), end.normalize(), freq="D"):
+                if current == start.normalize():
+                    add_event(row, current, "インターン開始", "開始日")
+                elif current == end.normalize():
+                    add_event(row, current, "インターン終了", "終了日")
+                else:
+                    add_event(row, current, "インターン期間中", "期間中")
+        else:
+            if not pd.isna(start):
+                add_event(row, start, "インターン開始", "開始日")
+            if not pd.isna(end):
+                add_event(row, end, "インターン終了", "終了日")
 
     return events
 
@@ -1180,8 +1186,8 @@ def show_calendar(df: pd.DataFrame) -> None:
     with col3:
         selected_types = st.multiselect(
             "表示する日付",
-            ["単日", "開始日", "終了日"],
-            default=["単日", "開始日", "終了日"],
+            ["単日", "開始日", "期間中", "終了日"],
+            default=["単日", "開始日", "期間中", "終了日"],
             key="calendar_event_types",
         )
 
