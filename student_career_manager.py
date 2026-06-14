@@ -62,6 +62,26 @@ JOB_OPTIONS = ["通信", "インフラ", "メーカー", "コンサル", "SIer",
 FINAL_STATUSES = {"内定", "落選"}
 ES_RESULT_OPTIONS = ["未作成", "作成中", "提出済み", "通過", "不通過", "保留"]
 
+STATUS_ACCENTS = {
+    "プレエントリー前": "#7dd3fc",
+    "プレエントリー済み": "#34d399",
+    "ES提出済み": "#fbbf24",
+    "適性検査受験済み": "#a78bfa",
+    "面接中": "#fb7185",
+    "内定": "#22c55e",
+    "落選": "#94a3b8",
+}
+
+STATUS_PROGRESS = {
+    "プレエントリー前": 8,
+    "プレエントリー済み": 18,
+    "ES提出済み": 38,
+    "適性検査受験済み": 55,
+    "面接中": 74,
+    "内定": 100,
+    "落選": 100,
+}
+
 LIGHT_STATUS_COLORS = {
     "プレエントリー前": "#e8f1ff",
     "プレエントリー済み": "#e8f7ee",
@@ -117,32 +137,156 @@ def is_read_only_mode() -> bool:
 
 
 def apply_style(dark_mode: bool) -> None:
-    bg = "#0f172a" if dark_mode else "#f7f8fb"
-    panel = "#111827" if dark_mode else "#ffffff"
-    text = "#e5e7eb" if dark_mode else "#1f2937"
-    muted = "#9ca3af" if dark_mode else "#6b7280"
-    border = "#374151" if dark_mode else "#e5e7eb"
+    bg = "#08111f" if dark_mode else "#f5f8fb"
+    panel = "#101927" if dark_mode else "#ffffff"
+    panel_soft = "#162234" if dark_mode else "#f8fafc"
+    text = "#eef6ff" if dark_mode else "#172033"
+    muted = "#9fb0c4" if dark_mode else "#64748b"
+    border = "#26364d" if dark_mode else "#dbe4ee"
+    input_bg = "#151b25" if dark_mode else "#ffffff"
 
     st.markdown(
         f"""
         <style>
         .stApp {{
-            background: {bg};
+            background:
+                radial-gradient(circle at 20% 0%, {"#10233a" if dark_mode else "#e7f7ff"} 0, transparent 32%),
+                linear-gradient(180deg, {bg} 0%, {"#0c1320" if dark_mode else "#f8fbff"} 100%);
             color: {text};
+        }}
+        .block-container {{
+            max-width: 1040px;
+            padding-top: 1.4rem;
+            padding-bottom: 6rem;
         }}
         [data-testid="stSidebar"] {{
             background: {panel};
+        }}
+        div[data-testid="stTabs"] div[role="tablist"] {{
+            gap: 8px;
+            border-bottom: 0;
+        }}
+        div[data-testid="stTabs"] button[role="tab"] {{
+            background: {panel_soft};
+            border: 1px solid {border};
+            border-radius: 999px;
+            color: {text};
+            min-height: 42px;
+            padding: 8px 16px;
+        }}
+        div[data-testid="stTabs"] button[aria-selected="true"] {{
+            background: linear-gradient(135deg, #5eead4, #60a5fa);
+            color: #06111f;
+            border-color: transparent;
+            font-weight: 800;
+        }}
+        .app-hero {{
+            background:
+                linear-gradient(135deg, {"#101b2c" if dark_mode else "#ffffff"} 0%, {"#13243a" if dark_mode else "#eaf8ff"} 100%);
+            border: 1px solid {border};
+            border-radius: 8px;
+            padding: 22px;
+            margin-bottom: 16px;
+            box-shadow: 0 18px 42px rgba(2, 8, 23, 0.20);
+        }}
+        .brand-word {{
+            font-size: clamp(2rem, 5vw, 3.4rem);
+            line-height: 1;
+            font-weight: 900;
+            letter-spacing: 0;
+            color: {text};
+        }}
+        .brand-word span {{
+            color: #5eead4;
+        }}
+        .hero-copy {{
+            color: {muted};
+            font-weight: 700;
+            margin-top: 8px;
+        }}
+        .mode-pill {{
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 8px 12px;
+            border-radius: 999px;
+            border: 1px solid {border};
+            color: {text};
+            background: {"#0e1727" if dark_mode else "#ffffff"};
+            font-weight: 800;
+            font-size: 0.86rem;
+            margin-top: 14px;
+        }}
+        .kpi-grid {{
+            display: grid;
+            grid-template-columns: repeat(5, minmax(0, 1fr));
+            gap: 10px;
+            margin: 12px 0 18px;
+        }}
+        .kpi-card {{
+            min-height: 86px;
+            background: {panel};
+            border: 1px solid {border};
+            border-top: 3px solid var(--accent);
+            border-radius: 8px;
+            padding: 12px;
+            box-shadow: 0 10px 28px rgba(2, 8, 23, 0.12);
+        }}
+        .kpi-label {{
+            color: {muted};
+            font-weight: 800;
+            font-size: 0.82rem;
+        }}
+        .kpi-value {{
+            color: {text};
+            font-size: 2rem;
+            line-height: 1.1;
+            font-weight: 900;
+            margin-top: 4px;
+        }}
+        .deadline-list {{
+            display: grid;
+            gap: 8px;
+            margin: 8px 0 18px;
+        }}
+        .deadline-row {{
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 12px;
+            border: 1px solid var(--accent);
+            background: color-mix(in srgb, var(--accent) 14%, transparent);
+            border-radius: 8px;
+            padding: 12px 14px;
+            color: {text};
+        }}
+        .deadline-main {{
+            font-weight: 900;
+        }}
+        .deadline-sub {{
+            color: {muted};
+            font-size: 0.86rem;
+            margin-top: 2px;
+        }}
+        .deadline-days {{
+            white-space: nowrap;
+            font-weight: 900;
+            color: var(--accent);
         }}
         .career-card, .calendar-wrap {{
             background: {panel};
             border: 1px solid {border};
             border-radius: 8px;
-            padding: 14px;
-            margin-bottom: 10px;
+            padding: 16px;
+            margin-bottom: 12px;
+            box-shadow: 0 14px 34px rgba(2, 8, 23, 0.16);
+        }}
+        .career-card {{
+            border-left: 4px solid var(--accent);
         }}
         .career-title {{
-            font-size: 1.05rem;
-            font-weight: 700;
+            font-size: 1.25rem;
+            font-weight: 900;
             color: {text};
             margin-bottom: 6px;
         }}
@@ -150,6 +294,43 @@ def apply_style(dark_mode: bool) -> None:
             color: {muted};
             line-height: 1.7;
             font-size: 0.94rem;
+        }}
+        .career-topline {{
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            gap: 12px;
+        }}
+        .status-chip, .deadline-chip {{
+            display: inline-flex;
+            align-items: center;
+            padding: 4px 10px;
+            border-radius: 999px;
+            color: {text};
+            border: 1px solid var(--accent);
+            background: color-mix(in srgb, var(--accent) 16%, transparent);
+            font-size: 0.8rem;
+            font-weight: 900;
+            white-space: nowrap;
+        }}
+        .deadline-chip {{
+            border-color: var(--urgency);
+            background: color-mix(in srgb, var(--urgency) 18%, transparent);
+            color: var(--urgency);
+        }}
+        .progress-track {{
+            width: 100%;
+            height: 8px;
+            border-radius: 999px;
+            background: {"#263244" if dark_mode else "#e2e8f0"};
+            margin: 12px 0 8px;
+            overflow: hidden;
+        }}
+        .progress-bar {{
+            height: 100%;
+            width: var(--progress);
+            border-radius: 999px;
+            background: linear-gradient(90deg, #5eead4, var(--accent));
         }}
         .tag {{
             display: inline-block;
@@ -159,6 +340,17 @@ def apply_style(dark_mode: bool) -> None:
             border-radius: 999px;
             color: {text};
             font-size: 0.82rem;
+        }}
+        input, textarea, select, div[data-baseweb="select"] > div {{
+            background-color: {input_bg} !important;
+            border-color: {border} !important;
+            color: {text} !important;
+            border-radius: 8px !important;
+        }}
+        div[data-testid="stDataFrame"] {{
+            border: 1px solid {border};
+            border-radius: 8px;
+            overflow: hidden;
         }}
         .calendar-grid {{
             display: grid;
@@ -222,6 +414,28 @@ def apply_style(dark_mode: bool) -> None:
                 padding-left: 0.75rem;
                 padding-right: 0.75rem;
                 padding-top: 1rem;
+            }}
+            .app-hero {{
+                padding: 18px;
+                margin-left: -2px;
+                margin-right: -2px;
+            }}
+            .kpi-grid {{
+                grid-template-columns: repeat(3, minmax(0, 1fr));
+            }}
+            .kpi-card {{
+                min-height: 76px;
+                padding: 10px;
+            }}
+            .kpi-value {{
+                font-size: 1.65rem;
+            }}
+            .career-topline {{
+                flex-direction: column;
+                gap: 8px;
+            }}
+            .deadline-row {{
+                align-items: flex-start;
             }}
             div[data-testid="stHorizontalBlock"] {{
                 flex-direction: column;
@@ -462,12 +676,94 @@ def date_label(row: pd.Series) -> str:
     return "未定"
 
 
+def get_status_accent(status: object) -> str:
+    return STATUS_ACCENTS.get(str(status), "#5eead4")
+
+
+def get_status_progress(status: object) -> int:
+    return STATUS_PROGRESS.get(str(status), 0)
+
+
 def next_event_date(row: pd.Series):
     dates = [parse_date(row.get(column, "")) for column in ("単日", "開始日", "終了日")]
     dates = [value for value in dates if not pd.isna(value)]
     if not dates:
         return pd.NaT
     return min(dates)
+
+
+def deadline_state(row: pd.Series) -> tuple[str, str, str]:
+    event_date = next_event_date(row)
+    if pd.isna(event_date):
+        return "予定未定", "#94a3b8", ""
+
+    days_left = (event_date.normalize() - pd.Timestamp.today().normalize()).days
+    if days_left < 0:
+        return "期限経過", "#94a3b8", event_date.strftime("%Y-%m-%d")
+    if days_left == 0:
+        return "本日", "#ef4444", event_date.strftime("%Y-%m-%d")
+    if days_left <= 1:
+        return "あと1日", "#ef4444", event_date.strftime("%Y-%m-%d")
+    if days_left <= 3:
+        return f"あと{days_left}日", "#f59e0b", event_date.strftime("%Y-%m-%d")
+    return f"あと{days_left}日", "#5eead4", event_date.strftime("%Y-%m-%d")
+
+
+def render_hero(read_only: bool) -> None:
+    today = pd.Timestamp.today()
+    mode_label = "閲覧専用" if read_only else "編集可能"
+    st.markdown(
+        f"""
+        <div class="app-hero">
+            <div class="brand-word">CAREER <span>TREE</span></div>
+            <div class="hero-copy">選考もESも、次の一手がすぐ見える就活ダッシュボード。</div>
+            <div class="mode-pill">{mode_label} / {today.month}/{today.day} {today.strftime('%a')}</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def render_kpi_tiles(metrics: list[tuple[str, int, str]]) -> None:
+    items = []
+    for label, value, accent in metrics:
+        items.append(
+            f"""
+            <div class="kpi-card" style="--accent:{accent};">
+                <div class="kpi-label">{html.escape(label)}</div>
+                <div class="kpi-value">{value}</div>
+            </div>
+            """
+        )
+
+    st.markdown(f'<div class="kpi-grid">{"".join(items)}</div>', unsafe_allow_html=True)
+
+
+def render_deadline_rows(rows: list[tuple[int, str, str, str]]) -> None:
+    if not rows:
+        st.info("直近3日以内の締切・開始日はありません。")
+        return
+
+    parts = []
+    for days_left, company, kind, accent in rows:
+        if days_left == 0:
+            days_label = "本日"
+        else:
+            days_label = f"あと{days_left}日"
+
+        parts.append(
+            f"""
+            <div class="deadline-row" style="--accent:{accent};">
+                <div>
+                    <div class="deadline-main">{html.escape(company)}</div>
+                    <div class="deadline-sub">{html.escape(kind)}</div>
+                </div>
+                <div class="deadline-days">{days_label}</div>
+            </div>
+            """
+        )
+
+    st.markdown(f'<div class="deadline-list">{"".join(parts)}</div>', unsafe_allow_html=True)
 
 
 def date_fields(prefix: str, kind: str, row: pd.Series | None = None) -> tuple[str, str, str]:
@@ -526,13 +822,16 @@ def render_card(row: pd.Series, status_colors: dict[str, str]) -> None:
     company = html.escape(str(row.get("企業名", "")))
     company_id = html.escape(str(row.get("企業ID", "")))
     job = html.escape(str(row.get("職種", "")))
-    status = html.escape(str(row.get("ステータス", "")))
+    status_raw = str(row.get("ステータス", ""))
+    status = html.escape(status_raw)
     kind = html.escape(str(row.get("種別", "")))
     memo = html.escape(str(row.get("メモ", "")))
     es_result = html.escape(str(row.get("ES結果", "")))
     es_submitted = html.escape(str(row.get("ES提出日", "")))
     date_text = html.escape(date_label(row))
-    bg = status_colors.get(str(row.get("ステータス", "")), "#ffffff")
+    accent = get_status_accent(status_raw)
+    progress = get_status_progress(status_raw)
+    deadline_label, urgency_color, deadline_date = deadline_state(row)
 
     job_tags = "".join(f'<span class="tag">{html.escape(tag)}</span>' for tag in split_jobs(job))
     memo_html = f"<br>メモ：{memo}" if memo else ""
@@ -546,15 +845,25 @@ def render_card(row: pd.Series, status_colors: dict[str, str]) -> None:
 
     st.markdown(
         f"""
-        <div class="career-card" style="background:{bg};">
-            <div class="career-title">🌳 {company}</div>
-            <div>{job_tags}</div>
+        <div class="career-card" style="--accent:{accent}; --urgency:{urgency_color}; --progress:{progress}%;">
+            <div class="career-topline">
+                <div>
+                    <div class="career-title">{company}</div>
+                    <div>{job_tags}</div>
+                </div>
+                <div class="status-chip">{status}</div>
+            </div>
+            <div class="progress-track"><div class="progress-bar"></div></div>
             <div class="career-meta">
-                ステータス：{status} / {kind}<br>
+                種別：{kind}<br>
                 日付：{date_text}
                 {id_html}
                 {memo_html}
                 {es_html}
+            </div>
+            <div style="margin-top:10px;">
+                <span class="deadline-chip">{html.escape(deadline_label)}</span>
+                <span class="career-meta"> {html.escape(deadline_date)}</span>
             </div>
         </div>
         """,
@@ -718,14 +1027,17 @@ def show_dashboard(df: pd.DataFrame) -> None:
     interview_count = len(df[df["ステータス"] == "面接中"])
     waiting_count = len(df[df["種別"] == "合否通知日"])
     offer_count = len(df[df["ステータス"] == "内定"])
-    fail_count = len(df[df["ステータス"] == "落選"])
+    es_count = len(df[df.apply(has_es_content, axis=1)]) if not df.empty else 0
 
-    col1, col2, col3, col4, col5 = st.columns(5)
-    col1.metric("進行中", active_count)
-    col2.metric("面接中", interview_count)
-    col3.metric("合否待ち", waiting_count)
-    col4.metric("内定", offer_count)
-    col5.metric("落選", fail_count)
+    render_kpi_tiles(
+        [
+            ("進行中", active_count, "#60a5fa"),
+            ("面接中", interview_count, "#fb7185"),
+            ("合否待ち", waiting_count, "#f59e0b"),
+            ("内定", offer_count, "#22c55e"),
+            ("ES保存", es_count, "#5eead4"),
+        ]
+    )
 
     st.markdown("#### ステータス別件数")
     status_summary = (
@@ -750,27 +1062,18 @@ def show_alerts(df: pd.DataFrame) -> None:
         if not pd.isna(single):
             days_left = (single.normalize() - today).days
             if 0 <= days_left <= 3:
-                alert_rows.append((days_left, row_id, row["企業名"], row["種別"], "期限"))
+                accent = "#ef4444" if days_left <= 1 else "#f59e0b"
+                alert_rows.append((days_left, row["企業名"], row["種別"], accent))
 
         start = parse_date(row["開始日"])
         if not pd.isna(start):
             days_left = (start.normalize() - today).days
             if 0 <= days_left <= 3:
-                alert_rows.append((days_left, row_id, row["企業名"], "インターン開始", "開始"))
+                accent = "#ef4444" if days_left <= 1 else "#f59e0b"
+                alert_rows.append((days_left, row["企業名"], "インターン開始", accent))
 
-    st.subheader("アラート")
-    if not alert_rows:
-        st.info("直近3日以内の締切・開始日はありません。")
-        return
-
-    for days_left, _, company, kind, alert_type in sorted(alert_rows):
-        if days_left == 0:
-            st.error(f"本日：{company} / {kind}")
-        elif days_left == 1:
-            st.warning(f"あと1日：{company} / {kind}")
-        else:
-            message = f"あと{days_left}日：{company} / {kind}"
-            st.warning(message if alert_type == "期限" else message)
+    st.subheader("締切アラート")
+    render_deadline_rows(sorted(alert_rows))
 
 
 def show_upcoming_events(df: pd.DataFrame) -> None:
@@ -1191,13 +1494,12 @@ def show_settings(df: pd.DataFrame, read_only: bool) -> None:
 
 def main() -> None:
     st.sidebar.title("Career Tree")
-    dark_mode = st.sidebar.toggle("ダークモード", value=False)
+    dark_mode = st.sidebar.toggle("集中モード", value=True)
     read_only = is_read_only_mode()
     apply_style(dark_mode)
     status_colors = DARK_STATUS_COLORS if dark_mode else LIGHT_STATUS_COLORS
 
-    st.title("🌳 Career Tree")
-    st.caption("就活・インターンの企業管理、締切管理、日程管理をまとめるダッシュボード")
+    render_hero(read_only)
     if read_only:
         st.info("閲覧専用モードで起動中です。スマホから登録済み内容を安全に確認できます。")
 
