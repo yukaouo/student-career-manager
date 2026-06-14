@@ -21,6 +21,7 @@ COLUMNS = [
     "企業ID",
     "企業HP",
     "職種",
+    "選考区分",
     "ステータス",
     "種別",
     "開始日",
@@ -61,6 +62,7 @@ EVENT_OPTIONS = [
 JOB_OPTIONS = ["通信", "インフラ", "メーカー", "コンサル", "SIer", "SE"]
 FINAL_STATUSES = {"内定", "落選"}
 ES_RESULT_OPTIONS = ["未作成", "作成中", "提出済み", "通過", "不通過", "保留"]
+SELECTION_TYPE_OPTIONS = ["本選考", "インターン", "その他"]
 
 STATUS_ACCENTS = {
     "プレエントリー前": "#7dd3fc",
@@ -219,7 +221,7 @@ def apply_style(dark_mode: bool) -> None:
         }}
         .kpi-grid {{
             display: grid;
-            grid-template-columns: repeat(5, minmax(0, 1fr));
+            grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
             gap: 10px;
             margin: 12px 0 18px;
         }}
@@ -421,7 +423,7 @@ def apply_style(dark_mode: bool) -> None:
                 margin-right: -2px;
             }}
             .kpi-grid {{
-                grid-template-columns: repeat(3, minmax(0, 1fr));
+                grid-template-columns: repeat(2, minmax(0, 1fr));
             }}
             .kpi-card {{
                 min-height: 76px;
@@ -521,6 +523,7 @@ def read_csv_file(path: str) -> pd.DataFrame:
             "締切": "エントリー締切",
         }
     )
+    df["選考区分"] = df.apply(infer_selection_type, axis=1)
     return df[COLUMNS].fillna("")
 
 
@@ -529,6 +532,7 @@ def normalize_columns(df: pd.DataFrame) -> pd.DataFrame:
     for column in COLUMNS:
         if column not in normalized.columns:
             normalized[column] = ""
+    normalized["選考区分"] = normalized.apply(infer_selection_type, axis=1)
     return normalized[COLUMNS].fillna("")
 
 
@@ -612,6 +616,28 @@ def build_job_value(selected_jobs: list[str], other_job: str) -> str:
     if other_job.strip():
         jobs.append(other_job.strip())
     return " / ".join(dict.fromkeys(jobs))
+
+
+def infer_selection_type(row: pd.Series) -> str:
+    current = str(row.get("選考区分", "")).strip()
+    if current in SELECTION_TYPE_OPTIONS:
+        return current
+
+    text = " ".join(
+        str(row.get(column, ""))
+        for column in ["種別", "メモ", "職種", "ステータス"]
+    )
+    if "インターン" in text:
+        return "インターン"
+    return "本選考"
+
+
+def is_rejected_row(row: pd.Series) -> bool:
+    return str(row.get("ステータス", "")) == "落選" or str(row.get("種別", "")) == "落選"
+
+
+def is_final_row(row: pd.Series) -> bool:
+    return str(row.get("ステータス", "")) in FINAL_STATUSES or str(row.get("種別", "")) == "落選"
 
 
 def find_duplicate_rows(
@@ -818,6 +844,7 @@ def render_card(row: pd.Series, status_colors: dict[str, str]) -> None:
     job = html.escape(str(row.get("職種", "")))
     status_raw = str(row.get("ステータス", ""))
     status = html.escape(status_raw)
+    selection_type = html.escape(infer_selection_type(row))
     kind = html.escape(str(row.get("種別", "")))
     memo = html.escape(str(row.get("メモ", "")))
     es_result = html.escape(str(row.get("ES結果", "")))
@@ -848,6 +875,7 @@ def render_card(row: pd.Series, status_colors: dict[str, str]) -> None:
         "</div>"
         '<div class="progress-track"><div class="progress-bar"></div></div>'
         '<div class="career-meta">'
+        f"区分：{selection_type}<br>"
         f"種別：{kind}<br>"
         f"日付：{date_text}"
         f"{id_html}"
@@ -881,6 +909,14 @@ def upsert_form(prefix: str, df: pd.DataFrame, row_id: int | None = None) -> Non
                 key=f"{prefix}_hp",
             )
         with col2:
+            selection_type_default = infer_selection_type(row)
+            selection_type = st.selectbox(
+                "選考区分",
+                SELECTION_TYPE_OPTIONS,
+                index=SELECTION_TYPE_OPTIONS.index(selection_type_default),
+                key=f"{prefix}_selection_type",
+            )
+
             status_default = str(row.get("ステータス", STATUS_OPTIONS[0]))
             if status_default not in STATUS_OPTIONS:
                 status_default = STATUS_OPTIONS[0]
@@ -990,6 +1026,7 @@ def upsert_form(prefix: str, df: pd.DataFrame, row_id: int | None = None) -> Non
         "企業ID": company_id.strip(),
         "企業HP": normalize_url(company_hp),
         "職種": build_job_value(selected_jobs, other_job),
+        "選考区分": selection_type,
         "ステータス": status,
         "種別": kind,
         "開始日": start_date,
@@ -1015,11 +1052,15 @@ def upsert_form(prefix: str, df: pd.DataFrame, row_id: int | None = None) -> Non
 
 
 def show_dashboard(df: pd.DataFrame) -> None:
-    active_count = len(df[~df["ステータス"].isin(FINAL_STATUSES)])
+    final_mask = df.apply(is_final_row, axis=1) if not df.empty else pd.Series(dtype=bool)
+    rejected_mask = df.apply(is_rejected_row, axis=1) if not df.empty else pd.Series(dtype=bool)
+    active_count = len(df[~final_mask]) if not df.empty else 0
     interview_count = len(df[df["ステータス"] == "面接中"])
     waiting_count = len(df[df["種別"] == "合否通知日"])
     offer_count = len(df[df["ステータス"] == "内定"])
     es_count = len(df[df.apply(has_es_content, axis=1)]) if not df.empty else 0
+    main_rejected_count = len(df[rejected_mask & (df["選考区分"] == "本選考")]) if not df.empty else 0
+    intern_rejected_count = len(df[rejected_mask & (df["選考区分"] == "インターン")]) if not df.empty else 0
 
     render_kpi_tiles(
         [
@@ -1027,6 +1068,8 @@ def show_dashboard(df: pd.DataFrame) -> None:
             ("面接中", interview_count, "#fb7185"),
             ("合否待ち", waiting_count, "#f59e0b"),
             ("内定", offer_count, "#22c55e"),
+            ("本選考落選", main_rejected_count, "#94a3b8"),
+            ("インターン落選", intern_rejected_count, "#38bdf8"),
             ("ES保存", es_count, "#5eead4"),
         ]
     )
@@ -1041,13 +1084,23 @@ def show_dashboard(df: pd.DataFrame) -> None:
     status_summary.columns = ["ステータス", "件数"]
     st.dataframe(status_summary, hide_index=True, use_container_width=True)
 
+    st.markdown("#### 選考区分別件数")
+    selection_summary = (
+        df["選考区分"]
+        .value_counts()
+        .reindex(SELECTION_TYPE_OPTIONS, fill_value=0)
+        .reset_index()
+    )
+    selection_summary.columns = ["選考区分", "件数"]
+    st.dataframe(selection_summary, hide_index=True, use_container_width=True)
+
 
 def show_alerts(df: pd.DataFrame) -> None:
     today = pd.Timestamp.today().normalize()
     alert_rows = []
 
     for row_id, row in df.iterrows():
-        if row["ステータス"] in FINAL_STATUSES:
+        if is_final_row(row):
             continue
 
         single = parse_date(row["単日"])
@@ -1073,7 +1126,7 @@ def show_upcoming_events(df: pd.DataFrame) -> None:
     rows = []
 
     for _, row in df.iterrows():
-        if row["ステータス"] in FINAL_STATUSES:
+        if is_final_row(row):
             continue
 
         candidates = [
@@ -1255,16 +1308,21 @@ def show_calendar(df: pd.DataFrame) -> None:
 def show_company_list(df: pd.DataFrame, status_colors: dict[str, str], read_only: bool) -> None:
     st.subheader("登録一覧")
 
-    col1, col2, col3 = st.columns([2, 1, 1])
+    col1, col2, col3, col4 = st.columns([2, 1, 1, 1])
     with col1:
         search_word = st.text_input("検索", placeholder="企業名・職種・メモで検索")
     with col2:
-        status_filter = st.selectbox("ステータス", ["すべて"] + STATUS_OPTIONS)
+        selection_filter = st.selectbox("選考区分", ["すべて"] + SELECTION_TYPE_OPTIONS)
     with col3:
+        status_filter = st.selectbox("ステータス", ["すべて"] + STATUS_OPTIONS)
+    with col4:
         sort_type = st.selectbox("並び替え", ["登録順", "企業名順", "単日が近い順", "開始日が近い順"])
 
     working = df.copy()
     working["_row_id"] = working.index
+
+    if selection_filter != "すべて":
+        working = working[working["選考区分"] == selection_filter]
 
     if status_filter != "すべて":
         working = working[working["ステータス"] == status_filter]
@@ -1373,7 +1431,7 @@ def show_es_archive(df: pd.DataFrame, read_only: bool) -> None:
         working["_sort_date"] = pd.to_datetime(working["ES提出日"], errors="coerce")
         working = working.sort_values("_sort_date", ascending=False, na_position="last")
 
-    export_columns = ["企業名", "企業ID", "職種", "ステータス", "ES結果", "ES提出日", "ES設問", "ES回答", "ESメモ"]
+    export_columns = ["企業名", "企業ID", "職種", "選考区分", "ステータス", "ES結果", "ES提出日", "ES設問", "ES回答", "ESメモ"]
     st.download_button(
         "ESアーカイブCSVをダウンロード",
         data=working[export_columns].to_csv(index=False, encoding="utf-8-sig").encode("utf-8-sig"),
@@ -1451,7 +1509,7 @@ def show_settings(df: pd.DataFrame, read_only: bool) -> None:
     else:
         st.warning(f"重複候補が {len(duplicate_df)} 件あります。")
         st.dataframe(
-            duplicate_df[["企業名", "企業ID", "職種", "ステータス", "種別", "単日"]],
+            duplicate_df[["企業名", "企業ID", "職種", "選考区分", "ステータス", "種別", "単日"]],
             hide_index=True,
             use_container_width=True,
         )
