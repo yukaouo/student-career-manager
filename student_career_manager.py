@@ -52,8 +52,6 @@ EVENT_OPTIONS = [
     "面接日",
     "合否通知日",
     "インターン期間",
-    "インターン開始日",
-    "インターン終了日",
     "内定日",
     "落選",
     "未定",
@@ -63,6 +61,13 @@ JOB_OPTIONS = ["通信", "インフラ", "メーカー", "コンサル", "SIer",
 FINAL_STATUSES = {"内定", "落選"}
 ES_RESULT_OPTIONS = ["未作成", "作成中", "提出済み", "通過", "不通過", "保留"]
 SELECTION_TYPE_OPTIONS = ["本選考", "インターン", "その他"]
+
+COMPANY_NAME_FIXES = {
+    "センッニコム": "ニッセイコム",
+    "ﾆｯｾｲｺﾑ": "ニッセイコム",
+    "ニッセイコム ": "ニッセイコム",
+    " ニッセイコム": "ニッセイコム",
+}
 
 STATUS_ACCENTS = {
     "プレエントリー前": "#7dd3fc",
@@ -521,6 +526,10 @@ def read_csv_file(path: str) -> pd.DataFrame:
             "SPI": "適性検査日",
             "SPI日": "適性検査日",
             "締切": "エントリー締切",
+            "インターン期間": "インターン期間",
+            "インターン開始日": "インターン期間",
+            "インターン終了日": "インターン期間",
+            "インターン": "インターン期間",
         }
     )
     df["選考区分"] = df.apply(infer_selection_type, axis=1)
@@ -532,6 +541,17 @@ def normalize_columns(df: pd.DataFrame) -> pd.DataFrame:
     for column in COLUMNS:
         if column not in normalized.columns:
             normalized[column] = ""
+    normalized["種別"] = normalized["種別"].replace(
+        {
+            "SPI": "適性検査日",
+            "SPI日": "適性検査日",
+            "締切": "エントリー締切",
+            "インターン期間": "インターン期間",
+            "インターン開始日": "インターン期間",
+            "インターン終了日": "インターン期間",
+            "インターン": "インターン期間",
+        }
+    )
     normalized["選考区分"] = normalized.apply(infer_selection_type, axis=1)
     return normalized[COLUMNS].fillna("")
 
@@ -640,13 +660,20 @@ def is_final_row(row: pd.Series) -> bool:
     return str(row.get("ステータス", "")) in FINAL_STATUSES or str(row.get("種別", "")) == "落選"
 
 
+def normalize_company_name(value: object) -> str:
+    text = str(value).strip()
+    text = text.replace("　", " ").strip()
+    text = " ".join(text.split())
+    return COMPANY_NAME_FIXES.get(text, text)
+
+
 def find_duplicate_rows(
     df: pd.DataFrame,
     name: str,
     company_id: str,
     current_row_id: int | None = None,
 ) -> pd.DataFrame:
-    name = name.strip().casefold()
+    name = normalize_company_name(name).casefold()
     company_id = company_id.strip().casefold()
 
     if not name and not company_id:
@@ -657,7 +684,7 @@ def find_duplicate_rows(
         working = working.drop(current_row_id)
 
     name_match = (
-        working["企業名"].astype(str).str.strip().str.casefold() == name
+        working["企業名"].astype(str).map(normalize_company_name).str.casefold() == name
         if name
         else pd.Series(False, index=working.index)
     )
@@ -785,7 +812,6 @@ def render_deadline_rows(rows: list[tuple[int, str, str, str]]) -> None:
 
     st.markdown(f'<div class="deadline-list">{"".join(parts)}</div>', unsafe_allow_html=True)
 
-
 def date_fields(prefix: str, kind: str, row: pd.Series | None = None) -> tuple[str, str, str]:
     row = row if row is not None else pd.Series(dtype=object)
     start_date = ""
@@ -793,50 +819,35 @@ def date_fields(prefix: str, kind: str, row: pd.Series | None = None) -> tuple[s
     single_date = ""
 
     if kind == "インターン期間":
+        st.caption("YYYY-MM-DD形式で入力してください。例：2026-08-25")
+
         col1, col2 = st.columns(2)
+
         with col1:
-            start_date = date_to_str(
-                st.date_input(
-                    "開始日",
-                    value=to_date_input_value(row.get("開始日", "")),
-                    key=f"{prefix}_start_date",
-                )
-            )
+            start_date = st.text_input(
+                "インターン開始日",
+                value=str(row.get("開始日", "")),
+                placeholder="2026-08-25",
+                key=f"{prefix}_intern_start_text",
+            ).strip()
+
         with col2:
-            end_date = date_to_str(
-                st.date_input(
-                    "終了日",
-                    value=to_date_input_value(row.get("終了日", "")),
-                    key=f"{prefix}_end_date",
-                )
-            )
-    elif kind == "インターン開始日":
-        start_date = date_to_str(
-            st.date_input(
-                "開始日",
-                value=to_date_input_value(row.get("開始日", "")),
-                key=f"{prefix}_start_only",
-            )
-        )
-    elif kind == "インターン終了日":
-        end_date = date_to_str(
-            st.date_input(
-                "終了日",
-                value=to_date_input_value(row.get("終了日", "")),
-                key=f"{prefix}_end_only",
-            )
-        )
+            end_date = st.text_input(
+                "インターン終了日",
+                value=str(row.get("終了日", "")),
+                placeholder="2026-08-29",
+                key=f"{prefix}_intern_end_text",
+            ).strip()
+
     elif kind not in {"落選", "未定"}:
-        single_date = date_to_str(
-            st.date_input(
-                "日付",
-                value=to_date_input_value(row.get("単日", "")),
-                key=f"{prefix}_single_date",
-            )
-        )
+        single_date = st.text_input(
+            "日付",
+            value=str(row.get("単日", "")),
+            placeholder="2026-07-01",
+            key=f"{prefix}_single_text",
+        ).strip()
 
     return start_date, end_date, single_date
-
 
 def render_card(row: pd.Series, status_colors: dict[str, str]) -> None:
     company = html.escape(str(row.get("企業名", "")))
@@ -1006,11 +1017,15 @@ def upsert_form(prefix: str, df: pd.DataFrame, row_id: int | None = None) -> Non
     if not submitted:
         return
 
-    if not name.strip():
+    clean_name = normalize_company_name(name)
+    if not clean_name:
         st.error("企業名は必須です。")
         return
 
-    duplicate_rows = find_duplicate_rows(df, name, company_id, row_id)
+    if clean_name != name.strip():
+        st.warning(f"企業名を補正しました：{name.strip()} → {clean_name}")
+
+    duplicate_rows = find_duplicate_rows(df, clean_name, company_id, row_id)
     if not duplicate_rows.empty and not allow_duplicate:
         duplicate_labels = [
             f"{item['企業名']} / ID: {item['企業ID'] or '未入力'} / {item['ステータス']}"
@@ -1022,7 +1037,7 @@ def upsert_form(prefix: str, df: pd.DataFrame, row_id: int | None = None) -> Non
 
     next_df = df.copy()
     values = {
-        "企業名": name.strip(),
+        "企業名": clean_name,
         "企業ID": company_id.strip(),
         "企業HP": normalize_url(company_hp),
         "職種": build_job_value(selected_jobs, other_job),
@@ -1493,7 +1508,7 @@ def show_settings(df: pd.DataFrame, read_only: bool) -> None:
 
     st.divider()
     st.markdown("#### 重複候補")
-    normalized_name = df["企業名"].astype(str).str.strip()
+    normalized_name = df["企業名"].astype(str).map(normalize_company_name).str.casefold()
     normalized_id = df["企業ID"].astype(str).str.strip()
     duplicate_mask = (
         (normalized_name.ne("") & normalized_name.duplicated(keep=False))
