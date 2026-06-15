@@ -280,6 +280,36 @@ def apply_style(dark_mode: bool) -> None:
             font-weight: 900;
             color: var(--accent);
         }}
+        .focus-board {{
+            display: grid;
+            gap: 8px;
+            margin: 8px 0 18px;
+        }}
+        .focus-item {{
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) auto;
+            gap: 10px;
+            align-items: center;
+            border: 1px solid var(--accent);
+            border-left: 4px solid var(--accent);
+            border-radius: 8px;
+            padding: 12px 14px;
+            background: color-mix(in srgb, var(--accent) 10%, {panel});
+            color: {text};
+        }}
+        .focus-company {{
+            font-weight: 900;
+        }}
+        .focus-detail {{
+            color: {muted};
+            font-size: 0.88rem;
+            margin-top: 2px;
+        }}
+        .focus-badge {{
+            white-space: nowrap;
+            font-weight: 900;
+            color: var(--accent);
+        }}
         .career-card, .calendar-wrap {{
             background: {panel};
             border: 1px solid {border};
@@ -812,6 +842,101 @@ def render_deadline_rows(rows: list[tuple[int, str, str, str]]) -> None:
 
     st.markdown(f'<div class="deadline-list">{"".join(parts)}</div>', unsafe_allow_html=True)
 
+
+def collect_focus_actions(df: pd.DataFrame, limit: int = 5) -> list[dict[str, object]]:
+    if df.empty:
+        return []
+
+    today = pd.Timestamp.today().normalize()
+    actions: list[dict[str, object]] = []
+
+    for _, row in df.iterrows():
+        if is_final_row(row):
+            continue
+
+        candidates = [
+            (row["単日"], row["種別"]),
+            (row["開始日"], "インターン開始"),
+            (row["終了日"], "インターン終了"),
+        ]
+
+        for value, label in candidates:
+            parsed = parse_date(value)
+            if pd.isna(parsed):
+                continue
+
+            days_left = (parsed.normalize() - today).days
+            if days_left < -14:
+                continue
+
+            if days_left < 0:
+                badge = "期限経過"
+                accent = "#ef4444"
+                priority = 0
+            elif days_left == 0:
+                badge = "本日"
+                accent = "#ef4444"
+                priority = 1
+            elif days_left <= 3:
+                badge = f"あと{days_left}日"
+                accent = "#f59e0b"
+                priority = 2
+            else:
+                badge = f"あと{days_left}日"
+                accent = "#60a5fa"
+                priority = 3 + days_left
+
+            actions.append(
+                {
+                    "company": row["企業名"],
+                    "detail": f"{label} / {parsed.strftime('%Y-%m-%d')}",
+                    "badge": badge,
+                    "accent": accent,
+                    "priority": priority,
+                    "date": parsed,
+                }
+            )
+
+        es_result = str(row.get("ES結果", "")).strip()
+        es_question = str(row.get("ES設問", "")).strip()
+        if es_question and es_result in {"", "未作成", "作成中"}:
+            actions.append(
+                {
+                    "company": row["企業名"],
+                    "detail": "ES回答を仕上げる",
+                    "badge": es_result or "未作成",
+                    "accent": "#5eead4",
+                    "priority": 4,
+                    "date": pd.Timestamp.max,
+                }
+            )
+
+    return sorted(actions, key=lambda item: (item["priority"], item["date"], str(item["company"])))[:limit]
+
+
+def show_focus_actions(df: pd.DataFrame) -> None:
+    actions = collect_focus_actions(df)
+    st.markdown("#### 今日の優先アクション")
+
+    if not actions:
+        st.info("今すぐ対応が必要な予定はありません。次の登録やES整理に使えます。")
+        return
+
+    parts = []
+    for action in actions:
+        parts.append(
+            f'<div class="focus-item" style="--accent:{action["accent"]};">'
+            "<div>"
+            f'<div class="focus-company">{html.escape(str(action["company"]))}</div>'
+            f'<div class="focus-detail">{html.escape(str(action["detail"]))}</div>'
+            "</div>"
+            f'<div class="focus-badge">{html.escape(str(action["badge"]))}</div>'
+            "</div>"
+        )
+
+    st.markdown(f'<div class="focus-board">{"".join(parts)}</div>', unsafe_allow_html=True)
+
+
 def date_fields(prefix: str, kind: str, row: pd.Series | None = None) -> tuple[str, str, str]:
     row = row if row is not None else pd.Series(dtype=object)
     start_date = ""
@@ -1088,6 +1213,8 @@ def show_dashboard(df: pd.DataFrame) -> None:
             ("ES保存", es_count, "#5eead4"),
         ]
     )
+
+    show_focus_actions(df)
 
     st.markdown("#### ステータス別件数")
     status_summary = (
@@ -1573,7 +1700,8 @@ def show_settings(df: pd.DataFrame, read_only: bool) -> None:
 
 def main() -> None:
     st.sidebar.title("Career Tree")
-    dark_mode = st.sidebar.toggle("集中モード", value=True)
+    dark_mode = st.sidebar.toggle("Moonモード", value=False)
+    st.sidebar.caption("初期表示はSunモードです。夜や集中したい時だけMoonモードに切り替えます。")
     read_only = is_read_only_mode()
     apply_style(dark_mode)
     status_colors = DARK_STATUS_COLORS if dark_mode else LIGHT_STATUS_COLORS
